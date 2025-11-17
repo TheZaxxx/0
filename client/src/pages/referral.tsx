@@ -1,221 +1,235 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
-import { Users, Copy, Check, Share2, Gift } from "lucide-react";
-import { type ReferralInfo } from "@shared/schema";
-import { getAuthHeaders } from "@/lib/auth";
+import { Badge } from "@/components/ui/badge";
+import { Users, Link as LinkIcon, Gift, Copy, Check } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import type { ReferralStats } from "@shared/schema";
 
 export default function Referral() {
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
 
-  const { data, isLoading } = useQuery<ReferralInfo>({
-    queryKey: ['/api/referral/info'],
-    queryFn: async () => {
-      const res = await fetch('/api/referral/info', {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to fetch referral info');
-      return res.json();
-    },
+  const { data: stats, isLoading } = useQuery<ReferralStats>({
+    queryKey: ["/api/referral"],
   });
 
-  const handleCopy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      toast({
-        title: "Copied!",
-        description: "Referral link copied to clipboard",
-      });
-      setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Failed to copy",
-        description: "Please try again",
-      });
+  const handleCopyLink = async () => {
+    if (stats?.referralLink) {
+      try {
+        await navigator.clipboard.writeText(stats.referralLink);
+        setCopied(true);
+        toast({
+          title: "Link copied!",
+          description: "Share this link with your friends to earn points",
+        });
+        setTimeout(() => setCopied(false), 2000);
+      } catch (error) {
+        toast({
+          title: "Failed to copy",
+          description: "Please copy the link manually",
+          variant: "destructive",
+        });
+      }
     }
   };
 
-  const handleShare = async () => {
-    if (navigator.share && data) {
+  const handleCopyCode = async () => {
+    if (stats?.referralCode) {
       try {
-        await navigator.share({
-          title: 'Join Chat AI',
-          text: `Use my referral code: ${data.referralCode} to earn bonus points!`,
-          url: data.shareableLink,
+        await navigator.clipboard.writeText(stats.referralCode);
+        toast({
+          title: "Code copied!",
+          description: "Your referral code has been copied",
         });
       } catch (error) {
-        console.log('Share cancelled');
+        toast({
+          title: "Failed to copy",
+          description: "Please copy the code manually",
+          variant: "destructive",
+        });
       }
     }
   };
 
   if (isLoading) {
     return (
-      <div className="p-4 md:p-8 space-y-8">
-        <div>
-          <Skeleton className="h-10 w-64 mb-2" />
-          <Skeleton className="h-5 w-96" />
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <Skeleton className="h-96" />
-          <Skeleton className="h-96" />
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-muted-foreground">Loading referral data...</p>
         </div>
       </div>
     );
   }
 
-  const stats = [
-    {
-      label: "Total Referrals",
-      value: data?.totalReferrals || 0,
-      icon: Users,
-      color: "text-chart-1",
-    },
-    {
-      label: "Active Referrals",
-      value: data?.activeReferrals || 0,
-      icon: Users,
-      color: "text-chart-2",
-    },
-    {
-      label: "Points Earned",
-      value: data?.totalPointsEarned || 0,
-      icon: Gift,
-      color: "text-chart-4",
-    },
-  ];
-
   return (
-    <div className="p-4 md:p-8 space-y-8">
-      <div>
-        <h1 className="text-4xl font-[Poppins] font-bold mb-2">Referral Program</h1>
-        <p className="text-muted-foreground text-lg">
-          Share your code and earn rewards for every friend who joins
-        </p>
+    <div className="flex flex-col h-full">
+      <div className="p-6 border-b border-border bg-gradient-to-r from-background via-accent/10 to-background">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                <Gift className="w-6 h-6 text-primary" />
+              </div>
+              <h1 className="text-2xl font-bold font-['Poppins'] bg-gradient-to-r from-[hsl(43,96%,45%)] via-[hsl(43,96%,52%)] to-[hsl(48,95%,60%)] bg-clip-text text-transparent">
+                Referral Program
+              </h1>
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Invite friends and earn rewards together
+            </p>
+          </div>
+          <Badge
+            variant="outline"
+            className="px-4 py-2 text-base border-primary/30 bg-gradient-to-r from-primary/5 to-accent/5"
+          >
+            <span className="font-semibold bg-gradient-to-r from-[hsl(43,96%,45%)] to-[hsl(48,95%,60%)] bg-clip-text text-transparent">
+              20 points
+            </span>
+            <span className="ml-1">per referral</span>
+          </Badge>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl font-[Poppins]">Your Referral Code</CardTitle>
-            <CardDescription>
-              Share this code with friends to earn 2 points per signup
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="bg-gradient-to-br from-primary/20 to-chart-3/20 rounded-2xl p-8 text-center">
-              <p className="text-sm text-muted-foreground mb-2">Your Code</p>
-              <p className="text-4xl font-[Poppins] font-bold tracking-wider font-mono" data-testid="text-referral-code">
-                {data?.referralCode}
-              </p>
-            </div>
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <Card className="border-2 border-primary/20 shadow-lg shadow-primary/10">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-primary" />
+                  Total Referrals
+                </CardTitle>
+                <CardDescription>Friends who joined using your link</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-5xl font-bold font-['Poppins'] bg-gradient-to-r from-[hsl(43,96%,45%)] via-[hsl(43,96%,52%)] to-[hsl(48,95%,60%)] bg-clip-text text-transparent">
+                  {stats?.totalReferrals || 0}
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">successful referrals</p>
+              </CardContent>
+            </Card>
 
-            <div className="space-y-3">
+            <Card className="border-2 border-primary/20 shadow-lg shadow-primary/10">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Gift className="w-5 h-5 text-primary" />
+                  Total Bonus Points
+                </CardTitle>
+                <CardDescription>Points earned from referrals</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="text-5xl font-bold font-['Poppins'] bg-gradient-to-r from-[hsl(43,96%,45%)] via-[hsl(43,96%,52%)] to-[hsl(48,95%,60%)] bg-clip-text text-transparent">
+                  {stats?.totalPoints || 0}
+                </div>
+                <p className="text-sm text-muted-foreground mt-2">points from referrals</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card className="border-2 border-primary/30 bg-gradient-to-br from-card via-accent/5 to-card">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <LinkIcon className="w-5 h-5 text-primary" />
+                Your Referral Link
+              </CardTitle>
+              <CardDescription>
+                Share this link with your friends to invite them to SydAI
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
               <div className="flex gap-2">
                 <Input
-                  value={data?.shareableLink || ''}
+                  value={stats?.referralLink || ""}
                   readOnly
-                  className="font-mono text-sm"
+                  className="flex-1 font-mono text-sm"
                   data-testid="input-referral-link"
                 />
                 <Button
-                  onClick={() => handleCopy(data?.shareableLink || '')}
-                  size="icon"
-                  variant="secondary"
+                  onClick={handleCopyLink}
+                  className="bg-gradient-to-r from-[hsl(43,96%,45%)] via-[hsl(43,96%,52%)] to-[hsl(48,95%,60%)] hover:opacity-90 transition-opacity"
                   data-testid="button-copy-link"
                 >
                   {copied ? (
-                    <Check className="w-5 h-5 text-chart-2" />
+                    <>
+                      <Check className="w-4 h-4 mr-2" />
+                      Copied!
+                    </>
                   ) : (
-                    <Copy className="w-5 h-5" />
+                    <>
+                      <Copy className="w-4 h-4 mr-2" />
+                      Copy Link
+                    </>
                   )}
                 </Button>
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <Button
-                  onClick={() => handleCopy(data?.referralCode || '')}
-                  variant="outline"
-                  className="w-full"
-                  data-testid="button-copy-code"
-                >
-                  <Copy className="w-4 h-4 mr-2" />
-                  Copy Code
-                </Button>
-                {navigator.share && (
+              <div className="pt-4 border-t border-border">
+                <p className="text-sm font-semibold text-foreground mb-2">Referral Code:</p>
+                <div className="flex gap-2">
+                  <Input
+                    value={stats?.referralCode || ""}
+                    readOnly
+                    className="flex-1 font-mono text-lg font-bold text-center"
+                    data-testid="input-referral-code"
+                  />
                   <Button
-                    onClick={handleShare}
                     variant="outline"
-                    className="w-full"
-                    data-testid="button-share"
+                    onClick={handleCopyCode}
+                    className="border-primary/30 hover:bg-primary/5"
+                    data-testid="button-copy-code"
                   >
-                    <Share2 className="w-4 h-4 mr-2" />
-                    Share
+                    <Copy className="w-4 h-4" />
                   </Button>
-                )}
-              </div>
-            </div>
-
-            <div className="bg-muted rounded-xl p-4 space-y-2">
-              <p className="font-semibold text-sm">How it works:</p>
-              <ul className="text-sm text-muted-foreground space-y-1">
-                <li>Share your code with friends</li>
-                <li>They enter it during registration</li>
-                <li>You earn 2 points instantly</li>
-                <li>Weekly bonus for active referrals</li>
-              </ul>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl font-[Poppins]">Your Stats</CardTitle>
-            <CardDescription>
-              Track your referral performance
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {stats.map((stat) => (
-              <div
-                key={stat.label}
-                className="flex items-center justify-between p-4 bg-muted/50 rounded-xl hover-elevate transition-all"
-                data-testid={`referral-stat-card-${stat.label.toLowerCase().replace(' ', '-')}`}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-background rounded-xl flex items-center justify-center">
-                    <stat.icon className={`w-6 h-6 ${stat.color}`} />
-                  </div>
-                  <span className="font-medium">{stat.label}</span>
                 </div>
-                <span className="text-2xl font-[Poppins] font-bold" data-testid={`stat-${stat.label.toLowerCase().replace(' ', '-')}`}>
-                  {stat.value}
-                </span>
               </div>
-            ))}
+            </CardContent>
+          </Card>
 
-            <div className="bg-gradient-to-br from-chart-1/20 to-chart-2/20 rounded-xl p-6 space-y-3">
-              <div className="flex items-center gap-2">
-                <Gift className="w-5 h-5 text-chart-1" />
-                <p className="font-semibold">Bonus Rewards</p>
+          <Card>
+            <CardHeader>
+              <CardTitle>How It Works</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex gap-3">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-primary">1</span>
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">Share Your Link</p>
+                  <p className="text-sm text-muted-foreground">
+                    Copy your unique referral link or code and share it with friends
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground">
-                Earn additional points when your referrals complete their weekly check-in streak!
-              </p>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-[Poppins] font-bold text-chart-1">+5</span>
-                <span className="text-sm text-muted-foreground">points per active referral/week</span>
+              <div className="flex gap-3">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-primary">2</span>
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">Friends Join SydAI</p>
+                  <p className="text-sm text-muted-foreground">
+                    When they sign up using your link, they become your referral
+                  </p>
+                </div>
               </div>
-            </div>
-          </CardContent>
-        </Card>
+              <div className="flex gap-3">
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center flex-shrink-0">
+                  <span className="text-sm font-bold text-primary">3</span>
+                </div>
+                <div>
+                  <p className="font-semibold text-foreground">Earn Bonus Points</p>
+                  <p className="text-sm text-muted-foreground">
+                    You automatically receive 20 points for each successful referral!
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

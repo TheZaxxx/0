@@ -1,126 +1,83 @@
-import { Switch, Route, Redirect, useLocation } from "wouter";
+import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { ThemeProvider } from "@/components/theme-provider";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/app-sidebar";
-import { authStorage } from "@/lib/auth";
-
-import NotFound from "@/pages/not-found";
-import Login from "@/pages/login";
-import Register from "@/pages/register";
-import Dashboard from "@/pages/dashboard";
+import { ThemeProvider } from "@/components/theme-provider";
+import { Moon, Sun } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useTheme } from "@/components/theme-provider";
 import Chat from "@/pages/chat";
 import Leaderboard from "@/pages/leaderboard";
 import Referral from "@/pages/referral";
 import Notifications from "@/pages/notifications";
+import Settings from "@/pages/settings";
+import NotFound from "@/pages/not-found";
 
-function ProtectedRoute({ component: Component }: { component: () => JSX.Element }) {
-  const isAuthenticated = authStorage.isAuthenticated();
-  
-  if (!isAuthenticated) {
-    return <Redirect to="/login" />;
-  }
-  
-  return <Component />;
-}
+function ThemeToggle() {
+  const { theme, setTheme } = useTheme();
 
-function PublicRoute({ component: Component }: { component: () => JSX.Element }) {
-  const isAuthenticated = authStorage.isAuthenticated();
-  
-  if (isAuthenticated) {
-    return <Redirect to="/dashboard" />;
-  }
-  
-  return <Component />;
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+      data-testid="button-theme-toggle"
+      className="hover-elevate active-elevate-2"
+    >
+      {theme === "dark" ? (
+        <Sun className="w-5 h-5" />
+      ) : (
+        <Moon className="w-5 h-5" />
+      )}
+    </Button>
+  );
 }
 
 function Router() {
   return (
     <Switch>
-      <Route path="/" >
-        {() => {
-          const isAuthenticated = authStorage.isAuthenticated();
-          return <Redirect to={isAuthenticated ? "/dashboard" : "/login"} />;
-        }}
-      </Route>
-      <Route path="/login">
-        {() => <PublicRoute component={Login} />}
-      </Route>
-      <Route path="/register">
-        {() => <PublicRoute component={Register} />}
-      </Route>
-      <Route path="/dashboard">
-        {() => <ProtectedRoute component={Dashboard} />}
-      </Route>
-      <Route path="/chat">
-        {() => <ProtectedRoute component={Chat} />}
-      </Route>
-      <Route path="/leaderboard">
-        {() => <ProtectedRoute component={Leaderboard} />}
-      </Route>
-      <Route path="/referral">
-        {() => <ProtectedRoute component={Referral} />}
-      </Route>
-      <Route path="/notifications">
-        {() => <ProtectedRoute component={Notifications} />}
-      </Route>
+      <Route path="/" component={Chat} />
+      <Route path="/leaderboard" component={Leaderboard} />
+      <Route path="/referral" component={Referral} />
+      <Route path="/notifications" component={Notifications} />
+      <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
   );
 }
 
-function AuthenticatedLayout() {
+function App() {
   const style = {
-    "--sidebar-width": "16rem",
-    "--sidebar-width-icon": "3rem",
+    "--sidebar-width": "20rem",
+    "--sidebar-width-icon": "4rem",
   };
 
-  return (
-    <SidebarProvider style={style as React.CSSProperties}>
-      <div className="flex h-screen w-full">
-        <AppSidebar />
-        <div className="flex flex-col flex-1 overflow-hidden">
-          <header className="flex items-center justify-between p-4 border-b">
-            <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
-          </header>
-          <main className="flex-1 overflow-y-auto">
-            <Router />
-          </main>
-        </div>
-      </div>
-    </SidebarProvider>
-  );
-}
-
-function PublicLayout() {
-  return (
-    <div className="min-h-screen">
-      <Router />
-    </div>
-  );
-}
-
-function AppContent() {
-  const [location] = useLocation();
-  const isPublicRoute = location === '/login' || location === '/register';
-  
-  return isPublicRoute ? <PublicLayout /> : <AuthenticatedLayout />;
-}
-
-export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ThemeProvider defaultTheme="light">
         <TooltipProvider>
-          <AppContent />
+          <SidebarProvider style={style as React.CSSProperties}>
+            <div className="flex h-screen w-full">
+              <AppSidebar />
+              <div className="flex flex-col flex-1">
+                <header className="flex items-center justify-between p-4 border-b border-border bg-background">
+                  <SidebarTrigger data-testid="button-sidebar-toggle" />
+                  <ThemeToggle />
+                </header>
+                <main className="flex-1 overflow-hidden bg-background">
+                  <Router />
+                </main>
+              </div>
+            </div>
+          </SidebarProvider>
           <Toaster />
         </TooltipProvider>
       </ThemeProvider>
     </QueryClientProvider>
   );
 }
+
+export default App;

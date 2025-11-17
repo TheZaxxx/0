@@ -1,149 +1,181 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Bell, BellOff, Trash2, Gift, Trophy, CheckCircle } from "lucide-react";
-import { type Notification } from "@shared/schema";
-import { getAuthHeaders } from "@/lib/auth";
-import { queryClient, apiRequest } from "@/lib/queryClient";
+import { Badge } from "@/components/ui/badge";
+import { Bell, CheckCheck, Trash2 } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import type { Notification } from "@shared/schema";
 import { formatDistanceToNow } from "date-fns";
 
 export default function Notifications() {
   const { toast } = useToast();
 
-  const { data, isLoading } = useQuery<{ notifications: Notification[] }>({
-    queryKey: ['/api/notifications'],
-    queryFn: async () => {
-      const res = await fetch('/api/notifications', {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error('Failed to fetch notifications');
-      return res.json();
-    },
+  const { data: notifications = [], isLoading } = useQuery<Notification[]>({
+    queryKey: ["/api/notifications"],
   });
 
   const markAsReadMutation = useMutation({
-    mutationFn: async (notificationId: string) => {
-      return apiRequest('POST', '/api/notifications/mark-read', { notificationId });
+    mutationFn: async (id: string) => {
+      return apiRequest("PATCH", `/api/notifications/${id}/read`, {});
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/notifications'] });
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
     },
   });
 
-  const getIcon = (type: string) => {
-    switch (type) {
-      case 'referral_bonus':
-        return <Gift className="w-5 h-5 text-chart-4" />;
-      case 'points_earned':
-        return <CheckCircle className="w-5 h-5 text-chart-2" />;
-      case 'leaderboard':
-        return <Trophy className="w-5 h-5 text-chart-1" />;
-      default:
-        return <Bell className="w-5 h-5 text-primary" />;
-    }
-  };
+  const deleteNotificationMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return apiRequest("DELETE", `/api/notifications/${id}`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+      toast({
+        title: "Notification deleted",
+        description: "The notification has been removed",
+      });
+    },
+  });
 
-  const notifications = data?.notifications || [];
-  const unreadCount = notifications.filter(n => !n.isRead).length;
+  const markAllAsReadMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("POST", "/api/notifications/mark-all-read", {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/notifications"] });
+      toast({
+        title: "All notifications marked as read",
+      });
+    },
+  });
 
-  if (isLoading) {
-    return (
-      <div className="p-4 md:p-8 space-y-8">
-        <div>
-          <Skeleton className="h-10 w-64 mb-2" />
-          <Skeleton className="h-5 w-96" />
-        </div>
-        <div className="space-y-3">
-          {[...Array(5)].map((_, i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-      </div>
-    );
-  }
+  const unreadCount = notifications.filter((n) => !n.isRead).length;
 
   return (
-    <div className="p-4 md:p-8 space-y-8 max-w-4xl mx-auto">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-4xl font-[Poppins] font-bold mb-2">Notifications</h1>
-          <p className="text-muted-foreground text-lg">
-            Stay updated with your activities and rewards
-          </p>
+    <div className="flex flex-col h-full">
+      <div className="p-6 border-b border-border bg-gradient-to-r from-background via-accent/10 to-background">
+        <div className="flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+                <Bell className="w-6 h-6 text-primary" />
+              </div>
+              <h1 className="text-2xl font-bold font-['Poppins'] bg-gradient-to-r from-[hsl(43,96%,45%)] via-[hsl(43,96%,52%)] to-[hsl(48,95%,60%)] bg-clip-text text-transparent">
+                Notifications
+              </h1>
+              {unreadCount > 0 && (
+                <Badge
+                  className="bg-gradient-to-r from-[hsl(43,96%,45%)] via-[hsl(43,96%,52%)] to-[hsl(48,95%,60%)] text-white shadow-md"
+                  data-testid="badge-unread-count"
+                >
+                  {unreadCount} new
+                </Badge>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Stay updated with your activity
+            </p>
+          </div>
+          {unreadCount > 0 && (
+            <Button
+              variant="outline"
+              onClick={() => markAllAsReadMutation.mutate()}
+              disabled={markAllAsReadMutation.isPending}
+              className="border-primary/30 hover:bg-primary/5"
+              data-testid="button-mark-all-read"
+            >
+              <CheckCheck className="w-4 h-4 mr-2" />
+              Mark all as read
+            </Button>
+          )}
         </div>
-        {unreadCount > 0 && (
-          <div className="bg-primary text-primary-foreground px-4 py-2 rounded-full font-semibold" data-testid="badge-unread">
-            {unreadCount} new
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-6">
+        {isLoading ? (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center">
+              <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+              <p className="text-muted-foreground">Loading notifications...</p>
+            </div>
+          </div>
+        ) : notifications.length === 0 ? (
+          <div className="flex items-center justify-center h-full">
+            <Card className="p-12 text-center max-w-md">
+              <div className="w-16 h-16 rounded-full bg-gradient-to-br from-primary/10 to-accent/10 flex items-center justify-center mx-auto mb-4">
+                <Bell className="w-8 h-8 text-primary" />
+              </div>
+              <h3 className="text-lg font-semibold mb-2">No Notifications</h3>
+              <p className="text-muted-foreground text-sm">
+                You're all caught up! Check back later for updates.
+              </p>
+            </Card>
+          </div>
+        ) : (
+          <div className="space-y-3 max-w-3xl mx-auto">
+            {notifications.map((notification) => (
+              <Card
+                key={notification.id}
+                className={`p-4 transition-all hover:shadow-md ${
+                  !notification.isRead
+                    ? "border-l-4 border-l-primary bg-accent/20"
+                    : "border border-card-border"
+                }`}
+                data-testid={`notification-${notification.id}`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <h3 className="font-semibold text-foreground">
+                        {notification.title}
+                      </h3>
+                      {!notification.isRead && (
+                        <Badge
+                          variant="secondary"
+                          className="text-xs"
+                          data-testid={`badge-unread-${notification.id}`}
+                        >
+                          New
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      {notification.message}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDistanceToNow(new Date(notification.createdAt), {
+                        addSuffix: true,
+                      })}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    {!notification.isRead && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => markAsReadMutation.mutate(notification.id)}
+                        disabled={markAsReadMutation.isPending}
+                        data-testid={`button-mark-read-${notification.id}`}
+                      >
+                        <CheckCheck className="w-4 h-4" />
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => deleteNotificationMutation.mutate(notification.id)}
+                      disabled={deleteNotificationMutation.isPending}
+                      data-testid={`button-delete-${notification.id}`}
+                    >
+                      <Trash2 className="w-4 h-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            ))}
           </div>
         )}
       </div>
-
-      {notifications.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-16">
-            <div className="w-20 h-20 bg-muted rounded-full flex items-center justify-center mb-4">
-              <BellOff className="w-10 h-10 text-muted-foreground" />
-            </div>
-            <p className="text-xl font-[Poppins] font-semibold mb-2">
-              No Notifications Yet
-            </p>
-            <p className="text-muted-foreground text-center max-w-md">
-              You'll receive notifications here when you earn points, get referral bonuses, or climb the leaderboard
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {notifications.map((notification) => (
-            <Card
-              key={notification.id}
-              className={`transition-all ${
-                !notification.isRead ? 'border-primary border-l-4' : ''
-              }`}
-              data-testid={`notification-card-${notification.id}`}
-            >
-              <CardContent className="p-4">
-                <div className="flex items-start gap-4">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                    !notification.isRead ? 'bg-primary/20' : 'bg-muted'
-                  }`}>
-                    {getIcon(notification.type)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1">
-                        <h3 className={`font-semibold ${
-                          !notification.isRead ? 'font-bold' : ''
-                        }`} data-testid={`notification-title-${notification.id}`}>
-                          {notification.title}
-                        </h3>
-                        <p className="text-sm text-muted-foreground mt-1" data-testid={`notification-message-${notification.id}`}>
-                          {notification.message}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-2" data-testid={`notification-time-${notification.id}`}>
-                          {formatDistanceToNow(new Date(notification.createdAt), { addSuffix: true })}
-                        </p>
-                      </div>
-                      {!notification.isRead && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => markAsReadMutation.mutate(notification.id)}
-                          data-testid={`button-mark-read-${notification.id}`}
-                        >
-                          Mark as read
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

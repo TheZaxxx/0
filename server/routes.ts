@@ -1,523 +1,251 @@
-import type { Express, Request, Response } from "express";
+import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
-import { insertUserSchema, loginSchema, chatMessageSchema, type UserStats, type LeaderboardEntry, type ReferralInfo } from "@shared/schema";
+import { insertMessageSchema, insertNotificationSchema, insertSettingsSchema } from "@shared/schema";
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET;
-
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET or SESSION_SECRET environment variable must be set');
-}
-
-interface AuthRequest extends Request {
-  userId?: string;
-}
-
-const authMiddleware = async (req: AuthRequest, res: Response, next: Function) => {
-  try {
-    const token = req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) {
-      return res.status(401).json({ error: 'No token provided' });
-    }
-
-    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string };
-    req.userId = decoded.userId;
-    next();
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid token' });
-  }
-};
-
-function generateReferralCode(): string {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let code = '';
-  for (let i = 0; i < 8; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return code;
-}
-
-async function checkWeeklyReferralBonus(userId: string) {
-  const userReferrals = await storage.getUserReferrals(userId);
-  const oneWeekAgo = new Date();
-  oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-  for (const referral of userReferrals) {
-    if (!referral.isActive) continue;
-
-    const referredCheckIns = await storage.getUserCheckIns(referral.referredId);
-    const weeklyCheckIns = referredCheckIns.filter(
-      checkIn => new Date(checkIn.checkInTime) >= oneWeekAgo
-    );
-
-    if (weeklyCheckIns.length >= 7) {
-      const activity = await storage.createReferralActivity({
-        referralId: referral.id,
-        activityType: 'weekly_checkin',
-        pointsEarned: 5,
-      });
-
-      await storage.createNotification({
-        userId: userId,
-        title: 'Weekly Referral Bonus',
-        message: `Your referral completed their weekly streak! +5 points!`,
-        type: 'referral_bonus',
-        isRead: false,
-      });
-    }
-  }
-}
+// Mock user ID for demo purposes - in production, this would come from authentication
+const DEMO_USER_ID = "default-user-id";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  app.post('/api/auth/register', async (req: Request, res: Response) => {
+  // Helper to get or create demo user
+  const getDemoUser = async () => {
+    const users = await storage.getAllUsers();
+    if (users.length === 0) {
+      return await storage.createUser({
+        username: "DemoUser",
+        password: "demo",
+      });
+    }
+    return users[users.length - 1]; // Return the last user (default user)
+  };
+
+  // Messages endpoints
+  app.get("/api/messages", async (req, res) => {
     try {
-      const validation = insertUserSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({ error: validation.error.errors[0].message });
-      }
-
-      const { email, password, name, referralCode } = validation.data;
-
-      const existingUser = await storage.getUserByEmail(email);
-      if (existingUser) {
-        return res.status(400).json({ error: 'User already exists' });
-      }
-
-      const hashedPassword = await bcrypt.hash(password, 10);
-      const userReferralCode = generateReferralCode();
-
-      const user = await storage.createUser({
-        email,
-        password: hashedPassword,
-        name,
-        referralCode: userReferralCode,
-      });
-
-      if (referralCode) {
-        const referrer = await storage.getReferralByCode(referralCode);
-        if (referrer && referrer.id !== user.id) {
-          const referral = await storage.createReferral({
-            referrerId: referrer.id,
-            referredId: user.id,
-            referralCode: referralCode,
-            isActive: true,
-          });
-
-          await storage.createReferralActivity({
-            referralId: referral.id,
-            activityType: 'signup',
-            pointsEarned: 2,
-          });
-
-          await storage.createNotification({
-            userId: referrer.id,
-            title: 'Referral Bonus',
-            message: `${name} joined using your referral code! +2 points!`,
-            type: 'referral_bonus',
-            isRead: false,
-          });
-        }
-      }
-
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-
-      res.status(201).json({
-        message: 'User created successfully',
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          referralCode: user.referralCode,
-        },
-      });
-    } catch (error: any) {
-      console.error('Register error:', error);
-      res.status(500).json({ error: 'Server error' });
+      const user = await getDemoUser();
+      const messages = await storage.getMessagesByUserId(user.id);
+      res.json(messages);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch messages" });
     }
   });
 
-  app.post('/api/auth/login', async (req: Request, res: Response) => {
+  app.post("/api/messages", async (req, res) => {
     try {
-      const validation = loginSchema.safeParse(req.body);
-      if (!validation.success) {
-        return res.status(400).json({ error: validation.error.errors[0].message });
-      }
-
-      const { email, password } = validation.data;
-
-      const user = await storage.getUserByEmail(email);
-      if (!user) {
-        return res.status(400).json({ error: 'Invalid credentials' });
-      }
-
-      const isValid = await bcrypt.compare(password, user.password);
-      if (!isValid) {
-        return res.status(400).json({ error: 'Invalid credentials' });
-      }
-
-      const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
-
-      res.json({
-        message: 'Login successful',
-        token,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          referralCode: user.referralCode,
-        },
-      });
-    } catch (error: any) {
-      console.error('Login error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.post('/api/chat/check-in', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const validation = chatMessageSchema.safeParse(req.body);
+      const user = await getDemoUser();
+      const parsed = insertMessageSchema.parse(req.body);
+      const message = await storage.createMessage(parsed, user.id);
       
-      if (!validation.success) {
-        return res.status(400).json({ error: validation.error.errors[0].message });
-      }
-
-      const { message } = validation.data;
-
-      const session = storage.getUserSession(userId);
-      const alreadyCheckedIn = await storage.getTodayCheckIn(userId);
-
-      await storage.createChatMessage({
-        userId,
-        message,
-        sender: 'user',
-        sessionId: 'default',
-      });
-
-      let aiResponse = "";
-      let checkedIn = false;
-      let pointsEarned = 0;
-
-      if (!session.hasStarted) {
-        if (message.trim().toUpperCase() === 'START') {
-          storage.updateUserSession(userId, true);
-          aiResponse = "Congratulations! You have successfully signed in. Now let's CHECK-IN to get points!";
-        } else {
-          aiResponse = "Wrong command. Please try to sign in correctly by typing START";
-        }
-      } else if (!alreadyCheckedIn) {
-        if (message.trim().toLowerCase() === 'check-in') {
-          const points = 10;
-          await storage.createCheckIn({
-            userId,
-            pointsEarned: points,
-          });
-
-          aiResponse = "Congratulations! You have successfully earned 10 points from today's check-in! Come back tomorrow to keep earning points, and maintain your weekly process to get bonuses!";
-          checkedIn = true;
-          pointsEarned = points;
-
-          await storage.createNotification({
-            userId,
-            title: 'Check-in Successful',
-            message: `You earned ${points} points for checking in today!`,
-            type: 'points_earned',
-            isRead: false,
-          });
-
-          await checkWeeklyReferralBonus(userId);
-        } else {
-          aiResponse = "Wrong command! You failed to check-in. Please try again with the correct command";
-        }
-      } else {
-        aiResponse = "Hi, you have already successfully checked in today! Come back tomorrow";
-      }
-
-      await storage.createChatMessage({
-        userId,
-        message: aiResponse,
-        sender: 'ai',
-        sessionId: 'default',
-      });
-
-      res.json({
-        response: aiResponse,
-        checkedIn: checkedIn || !!alreadyCheckedIn,
-        alreadyChecked: !!alreadyCheckedIn,
-        pointsEarned,
-        hasStarted: session.hasStarted,
-      });
-    } catch (error: any) {
-      console.error('Chat error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.get('/api/chat/history', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const userMessages = await storage.getUserChatMessages(userId);
-
-      const groupedMessages: Record<string, typeof userMessages> = {};
-      userMessages.forEach(msg => {
-        const date = new Date(msg.createdAt).toDateString();
-        if (!groupedMessages[date]) {
-          groupedMessages[date] = [];
-        }
-        groupedMessages[date].push(msg);
-      });
-
-      res.json({
-        messages: groupedMessages,
-        total: userMessages.length,
-      });
-    } catch (error: any) {
-      console.error('Chat history error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.get('/api/leaderboard/weekly', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-      const allCheckIns = await storage.getAllCheckIns();
-      const allUsers = await storage.getAllUsers();
-      const allReferralActivities = await storage.getAllReferralActivities();
-      const allReferrals = await storage.getUserReferrals(req.userId!);
-
-      const weeklyPoints: Record<string, number> = {};
-
-      allCheckIns.forEach(checkIn => {
-        if (new Date(checkIn.checkInTime) >= oneWeekAgo) {
-          if (!weeklyPoints[checkIn.userId]) {
-            weeklyPoints[checkIn.userId] = 0;
-          }
-          weeklyPoints[checkIn.userId] += checkIn.pointsEarned;
-        }
-      });
-
-      allReferralActivities.forEach(activity => {
-        if (new Date(activity.createdAt) >= oneWeekAgo) {
-          const referral = allReferrals.find(r => r.id === activity.referralId);
-          if (referral) {
-            if (!weeklyPoints[referral.referrerId]) {
-              weeklyPoints[referral.referrerId] = 0;
-            }
-            weeklyPoints[referral.referrerId] += activity.pointsEarned;
-          }
-        }
-      });
-
-      const leaderboard: LeaderboardEntry[] = Object.entries(weeklyPoints)
-        .map(([userId, points]) => {
-          const user = allUsers.find(u => u.id === userId);
-          return {
-            userId,
-            name: user?.name || 'Unknown User',
-            points,
-            email: user?.email || '',
-          };
-        })
-        .sort((a, b) => b.points - a.points)
-        .slice(0, 10);
-
-      res.json({ leaderboard });
-    } catch (error: any) {
-      console.error('Leaderboard error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.get('/api/leaderboard/alltime', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const allCheckIns = await storage.getAllCheckIns();
-      const allUsers = await storage.getAllUsers();
-      const allReferralActivities = await storage.getAllReferralActivities();
-      const allReferrals = await storage.getUserReferrals(req.userId!);
-
-      const allTimePoints: Record<string, number> = {};
-
-      allCheckIns.forEach(checkIn => {
-        if (!allTimePoints[checkIn.userId]) {
-          allTimePoints[checkIn.userId] = 0;
-        }
-        allTimePoints[checkIn.userId] += checkIn.pointsEarned;
-      });
-
-      allReferralActivities.forEach(activity => {
-        const referral = allReferrals.find(r => r.id === activity.referralId);
-        if (referral) {
-          if (!allTimePoints[referral.referrerId]) {
-            allTimePoints[referral.referrerId] = 0;
-          }
-          allTimePoints[referral.referrerId] += activity.pointsEarned;
-        }
-      });
-
-      const leaderboard: LeaderboardEntry[] = Object.entries(allTimePoints)
-        .map(([userId, points]) => {
-          const user = allUsers.find(u => u.id === userId);
-          return {
-            userId,
-            name: user?.name || 'Unknown User',
-            points,
-            email: user?.email || '',
-          };
-        })
-        .sort((a, b) => b.points - a.points)
-        .slice(0, 10);
-
-      res.json({ leaderboard });
-    } catch (error: any) {
-      console.error('All-time leaderboard error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.get('/api/referral/info', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const user = await storage.getUser(userId);
-
-      if (!user) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      const userReferrals = await storage.getUserReferrals(userId);
-      const activeReferrals = userReferrals.filter(r => r.isActive);
-
-      let totalReferralPoints = 0;
-      for (const ref of userReferrals) {
-        const activities = await storage.getReferralActivities(ref.id);
-        totalReferralPoints += activities.reduce((sum, activity) => sum + activity.pointsEarned, 0);
-      }
-
-      let domain = 'http://localhost:5000';
-      if (process.env.REPLIT_DEV_DOMAIN) {
-        domain = `https://${process.env.REPLIT_DEV_DOMAIN}`;
-      } else if (process.env.REPL_SLUG && process.env.REPL_OWNER) {
-        domain = `https://${process.env.REPL_SLUG}.${process.env.REPL_OWNER}.repl.co`;
-      }
-
-      const referralInfo: ReferralInfo = {
-        referralCode: user.referralCode,
-        totalReferrals: userReferrals.length,
-        activeReferrals: activeReferrals.length,
-        totalPointsEarned: totalReferralPoints,
-        shareableLink: `${domain}/register?ref=${user.referralCode}`,
-      };
-
-      res.json(referralInfo);
-    } catch (error: any) {
-      console.error('Referral info error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.get('/api/notifications', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const notifications = await storage.getUserNotifications(userId);
-      const limitedNotifications = notifications.slice(0, 20);
-
-      res.json({ notifications: limitedNotifications });
-    } catch (error: any) {
-      console.error('Notifications error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.post('/api/notifications/mark-read', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const { notificationId } = req.body;
-      await storage.markNotificationAsRead(notificationId);
-      res.json({ message: 'Notification marked as read' });
-    } catch (error: any) {
-      console.error('Mark read error:', error);
-      res.status(500).json({ error: 'Server error' });
-    }
-  });
-
-  app.get('/api/user/stats', authMiddleware, async (req: AuthRequest, res: Response) => {
-    try {
-      const userId = req.userId!;
-      const userCheckIns = await storage.getUserCheckIns(userId);
-      const userReferrals = await storage.getUserReferrals(userId);
-      const allCheckIns = await storage.getAllCheckIns();
-      const allReferralActivities = await storage.getAllReferralActivities();
-
-      const totalPoints = userCheckIns.reduce((sum, checkIn) => sum + checkIn.pointsEarned, 0);
+      // Award points for sending a message
+      await storage.updateUserPoints(user.id, 1);
       
-      let referralPoints = 0;
-      for (const ref of userReferrals) {
-        const activities = await storage.getReferralActivities(ref.id);
-        referralPoints += activities.reduce((sum, activity) => sum + activity.pointsEarned, 0);
+      res.json(message);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid message data" });
+    }
+  });
+
+  // Check-in endpoint
+  app.post("/api/checkin", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      
+      // Check if user already checked in today
+      if (user.lastCheckin) {
+        const lastCheckin = new Date(user.lastCheckin);
+        const today = new Date();
+        const isSameDay =
+          lastCheckin.getDate() === today.getDate() &&
+          lastCheckin.getMonth() === today.getMonth() &&
+          lastCheckin.getFullYear() === today.getFullYear();
+        
+        if (isSameDay) {
+          return res.status(400).json({ error: "Already checked in today" });
+        }
       }
-
-      const totalPointsWithReferrals = totalPoints + referralPoints;
-
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-      const weeklyCheckIns = userCheckIns.filter(checkIn => new Date(checkIn.checkInTime) >= oneWeekAgo);
-      const weeklyPoints = weeklyCheckIns.reduce((sum, checkIn) => sum + checkIn.pointsEarned, 0);
-
-      let dailyStreak = 0;
-      const sortedCheckIns = [...userCheckIns].sort((a, b) => 
-        new Date(b.checkInTime).getTime() - new Date(a.checkInTime).getTime()
+      
+      // Update check-in and award points
+      const updatedUser = await storage.updateUserCheckin(user.id);
+      
+      // Create notification
+      await storage.createNotification(
+        {
+          title: "Daily Check-in Complete!",
+          message: "You've earned 10 points! Come back tomorrow for more.",
+        },
+        user.id
       );
       
-      if (sortedCheckIns.length > 0) {
-        dailyStreak = 1;
-        let currentDate = new Date(sortedCheckIns[0].checkInTime);
-        
-        for (let i = 1; i < sortedCheckIns.length; i++) {
-          const prevDate = new Date(sortedCheckIns[i].checkInTime);
-          const daysDiff = Math.floor((currentDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24));
-          
-          if (daysDiff === 1) {
-            dailyStreak++;
-            currentDate = prevDate;
-          } else {
-            break;
-          }
-        }
+      res.json(updatedUser);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to check in" });
+    }
+  });
+
+  // User info endpoint
+  app.get("/api/user", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      res.json(user);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch user" });
+    }
+  });
+
+  // Leaderboard endpoint
+  app.get("/api/leaderboard", async (req, res) => {
+    try {
+      const page = parseInt(req.query.page as string) || 0;
+      const limit = 10;
+      const leaderboard = await storage.getLeaderboard(page, limit);
+      res.json(leaderboard);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch leaderboard" });
+    }
+  });
+
+  // Notifications endpoints
+  app.get("/api/notifications", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      const notifications = await storage.getNotificationsByUserId(user.id);
+      res.json(notifications);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  app.post("/api/notifications", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      const parsed = insertNotificationSchema.parse(req.body);
+      const notification = await storage.createNotification(parsed, user.id);
+      res.json(notification);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid notification data" });
+    }
+  });
+
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const notification = await storage.markNotificationAsRead(id);
+      if (!notification) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json(notification);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to mark notification as read" });
+    }
+  });
+
+  app.post("/api/notifications/mark-all-read", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      await storage.markAllNotificationsAsRead(user.id);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to mark all notifications as read" });
+    }
+  });
+
+  app.delete("/api/notifications/:id", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const deleted = await storage.deleteNotification(id);
+      if (!deleted) {
+        return res.status(404).json({ error: "Notification not found" });
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to delete notification" });
+    }
+  });
+
+  // Settings endpoints
+  app.get("/api/settings", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      let settings = await storage.getSettingsByUserId(user.id);
+      
+      // Create default settings if they don't exist
+      if (!settings) {
+        settings = await storage.createSettings(
+          {
+            theme: "light",
+            notifications: true,
+            emailNotifications: false,
+          },
+          user.id
+        );
+      }
+      
+      res.json(settings);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch settings" });
+    }
+  });
+
+  app.patch("/api/settings", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      const parsed = insertSettingsSchema.partial().parse(req.body);
+      
+      let settings = await storage.getSettingsByUserId(user.id);
+      
+      if (!settings) {
+        // Create if doesn't exist
+        settings = await storage.createSettings(
+          {
+            theme: parsed.theme || "light",
+            notifications: parsed.notifications ?? true,
+            emailNotifications: parsed.emailNotifications ?? false,
+          },
+          user.id
+        );
+      } else {
+        // Update existing
+        settings = await storage.updateSettings(user.id, parsed);
+      }
+      
+      res.json(settings);
+    } catch (error) {
+      res.status(400).json({ error: "Invalid settings data" });
+    }
+  });
+
+  // Referral endpoints
+  app.get("/api/referral", async (req, res) => {
+    try {
+      const user = await getDemoUser();
+      const stats = await storage.getReferralStats(user.id);
+      res.json(stats);
+    } catch (error) {
+      res.status(500).json({ error: "Failed to fetch referral stats" });
+    }
+  });
+
+  app.post("/api/referral/complete", async (req, res) => {
+    try {
+      const { referralCode, userId } = req.body;
+      
+      if (!referralCode || !userId) {
+        return res.status(400).json({ error: "Missing referral code or user ID" });
       }
 
-      const todayCheckIn = await storage.getTodayCheckIn(userId);
+      const success = await storage.completeReferral(referralCode, userId);
+      
+      if (!success) {
+        return res.status(404).json({ error: "Invalid referral code" });
+      }
 
-      const allUserPoints: Record<string, number> = {};
-      allCheckIns.forEach(checkIn => {
-        if (!allUserPoints[checkIn.userId]) {
-          allUserPoints[checkIn.userId] = 0;
-        }
-        allUserPoints[checkIn.userId] += checkIn.pointsEarned;
-      });
-
-      const sortedUsers = Object.entries(allUserPoints)
-        .sort((a, b) => b[1] - a[1]);
-      const rank = sortedUsers.findIndex(([id]) => id === userId) + 1;
-
-      const stats: UserStats = {
-        totalPoints: totalPointsWithReferrals,
-        weeklyPoints,
-        dailyStreak,
-        totalReferrals: userReferrals.length,
-        rank: rank || 0,
-        todayCheckedIn: !!todayCheckIn,
-      };
-
-      res.json(stats);
-    } catch (error: any) {
-      console.error('Stats error:', error);
-      res.status(500).json({ error: 'Server error' });
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to complete referral" });
     }
   });
 
   const httpServer = createServer(app);
+
   return httpServer;
 }
